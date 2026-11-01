@@ -327,6 +327,16 @@ describe('저장소 판정', () => {
     assert.equal(r.stdout, `OK-SCRIPTS 0\nFEEDBACK-OPEN 2 ${dir}\n`)
   })
 
+  test('코디네이터의 coordinator-<YYYYMMDD>.md 도 열린 후보로 센다. 다른 이름의 폴더는 세지 않는다', () => {
+    const dir = join(tmp, '.orch', 'feedback')
+    write(join(dir, 'coordinator-20261101.md'), '## 후보\n')
+    write(join(dir, 'wt-a.md'), '후보\n')
+    write(join(tmp, '.orch', 'skill-feedback', 'wt-b.md'), '후보\n')
+    const r = doctor(['--skip-version', '--skip-questions', '--skill-dir', skill])
+    assert.equal(r.code, 0, r.stdout + r.stderr)
+    assert.equal(r.stdout, `OK-SCRIPTS 0\nFEEDBACK-OPEN 2 ${dir}\n`)
+  })
+
   test('열린 후보가 없거나 폴더가 없으면 FEEDBACK-OPEN 을 내지 않는다', () => {
     const r = doctor(['--skip-version', '--skip-questions', '--skill-dir', skill])
     assert.equal(r.stdout, 'OK-SCRIPTS 0\n')
