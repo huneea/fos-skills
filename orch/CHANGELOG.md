@@ -3,6 +3,12 @@
 버전은 `SKILL.md` frontmatter 의 `metadata.version` 과 같은 값을 쓴다.
 올리는 기준과 쓰는 형식은 저장소 README 의 "버전과 변경 이력" 을 따른다.
 
+## 5.9.0 (2026-11-01)
+
+- Codex worker 를 띄울 때 `SSH_AUTH_SOCK` 이 있으면 `launch-worker` 가 그 워크트리에만 `core.sshCommand`(`ssh -o IdentityAgent=<소켓>`)를 둔다
+- Codex 의 `inherit = "core"` 설정 때문에 worker 의 `git fetch`·`git push` 가 `Permission denied (publickey)` 로 막히던 것을 막는다
+- 사용자가 이미 정한 `core.sshCommand` 는 덮지 않는다. Claude worker 에는 설정하지 않는다
+
 ## 5.8.0 (2026-11-01)
 
 - `reserve-migration --kind java` 가 그 모듈의 `migrations.watch` 폴더(여럿이면 `--dir` 로 고른 것)에 `V<버전>__<이름>.java` 경로를 예약한다. 이름은 대소문자를 지키고 Java 식별자가 아니면 사용법 오류다
