@@ -39,6 +39,7 @@
 //     래퍼 옵션은 `--옵션 값` 과 `--옵션=값` 을 받는다. 고유 접두로 줄여 쓸 수 없다
 //
 // merge_queue.ts 옵션은 그대로 쓴다(--repo, --required, --require-up-to-date 같은 것). --repo 는 마무리에도 넘어간다.
+// --repo 가 git 작업 트리 안의 디렉터리가 아니면 사용법 오류다(lib/git.ts 의 repoArgProblem). 큐와 마무리 로그 폴더를 만들기 전에 본다.
 // 값을 받는 머지 큐 옵션은 lib/queue-options.ts 의 목록이다. 그 옵션 바로 뒤의 인자는 숫자여도 PR 번호로 읽지 않는다.
 //
 // 머지 큐 기본값: --finish-config 파일(없으면 orch 작업 폴더의 config.json)의 `queue` 절을 읽어
@@ -75,6 +76,7 @@ import type { Config } from './lib/config.ts'
 import { eventTimeoutSec, handlerFile } from './lib/events.ts'
 import { FINISH_OPTIONS } from './lib/finish-options.ts'
 import { isFile, real } from './lib/fs.ts'
+import { repoArgProblem } from './lib/git.ts'
 import { makeParent, pathOf, requireMigrated } from './lib/paths.ts'
 import { NO_LIMIT_MS, runInherit, scriptCommand } from './lib/proc.ts'
 import { pidFileAlive } from './lib/process.ts'
@@ -343,6 +345,12 @@ async function main(argv: string[]): Promise<number> {
   const { wrapper, prs } = parsed
   if (prs.length === 0) {
     out(usageText())
+    return 2
+  }
+  // 큐와 마무리 로그 폴더를 만들기 전에 본다. 없는 경로면 설정 없이 돌고 폴더를 엉뚱한 곳에 만든다
+  const repoProblem = repoArgProblem(wrapper.repo)
+  if (repoProblem) {
+    process.stderr.write(`merge-with-finish: ${repoProblem}\n`)
     return 2
   }
   if (!wrapper.finishConfig && !requireMigrated(wrapper.repo, 'merge-with-finish', '설정 파일을 --finish-config 로 직접 준다')) return 2

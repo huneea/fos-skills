@@ -126,6 +126,11 @@ process.exit(3)
 export const FAKE_GIT = `const fs = require('node:fs')
 const args = process.argv.slice(2)
 fs.appendFileSync(process.env.FAKE_LOG, 'git ' + args.join(' ') + '\\n')
+// --repo 검사(lib/git.ts 의 repoArgProblem)에는 작업 트리라고 답한다
+if (args.includes('--is-inside-work-tree')) {
+  fs.writeSync(1, 'true\\n')
+  process.exit(0)
+}
 if (args[0] === 'rev-parse' && !args.includes('--verify')) process.exit(128)
 if (args[0] === 'rev-parse' || args[0] === 'ls-remote') {
   const state = JSON.parse(fs.readFileSync(process.env.FAKE_STATE, 'utf8'))

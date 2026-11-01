@@ -29,7 +29,9 @@
 //
 // 완료 계약 (--completion-contract ready):
 //     worker_done 이 오면 같은 Task·Dispatch·발신자가 앞서 `준비됨 #N, head <전체 40자리 SHA>` 상태를 보냈는지
-//     `check --all` 로 읽어 대조한다(lib/completion.ts). 이미 ack 한 준비 상태도 읽으며 delivery 는 소비하지 않는다.
+//     `check --all --types status` 로 읽어 대조한다(lib/completion.ts). 이미 ack 한 준비 상태도 읽으며 delivery 는 소비하지 않는다.
+//     `check --all` 은 최대 100행이라 status 로 좁혀 heartbeat 에 밀리지 않게 한다. 그래도 근거가 없는 worker_done 이 남으면
+//     `inbox --limit 3000` 에서 이 Run 의 행만 골라 다시 대조한다. 둘 다 ack 하거나 소비하지 않는다.
 //     근거가 없거나 이력을 읽지 못하면 `의심스러운 worker_done` 으로 따로 표시하고 자동 ack 하지 않은 채 종료 코드 6 으로 끝난다.
 //     `worker_done --outcome failed` 같은 명시적인 실패 보고는 준비 상태 없이도 처리할 묶음으로 낸다.
 //
@@ -173,6 +175,8 @@ const LIVE_STATUSES = new Set(['pending', 'dispatched', 'running'])
 const LOST_WORKER_STATES = new Set(['abandoned', 'failed', 'stopped'])
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'fish'])
 const HISTORY_TIMEOUT_MS = 30_000
+// 완료 근거를 다시 찾을 때 읽는 inbox 행 수. 11-01 실측으로 630행을 1초에 읽었다
+const INBOX_LIMIT = 3000
 // orca 는 --timeout-ms 에 끝난다. 그 뒤에도 남은 check 를 끝내기까지 더 기다리는 시간
 const CHECK_GRACE_MS = 30_000
 const ORCH_BIN = fileURLToPath(new URL('../bin/orch.ts', import.meta.url))
@@ -720,6 +724,19 @@ function hasHandler(event: string, runId: string): boolean {
   return handlerFile(event, contextFor(runId).repo) !== null
 }
 
+// worker_done 을 앞선 준비 상태와 대조한다(머리 주석의 「완료 계약」). 이미 ack 한 준비 상태도 읽는다.
+// check --all 은 최대 100행이라 status 로 좁혀 읽는다. 그래도 근거가 없으면 inbox 를 이 Run 으로 필터링해 다시 대조한다.
+// 두 조회 모두 delivery 를 소비하거나 ack 하지 않는다
+function verifyCompletion(messages: Json[], runId: string): Json[] {
+  const rows = (result: Json | null) => (result && Array.isArray(result.messages) ? result.messages.map(obj) : [])
+  const statuses = rows(orcaResult(['check', '--run', runId, '--all', '--types', 'status'], HISTORY_TIMEOUT_MS))
+  const first = classify(messages, statuses)
+  if (!first.some((m) => m.type === 'suspicious_worker_done')) return first
+  const inbox = rows(orcaResult(['inbox', '--limit', String(INBOX_LIMIT)], HISTORY_TIMEOUT_MS))
+  const mine = inbox.filter((m) => m.type === 'status' && (m.run_id ?? m.runId) === runId)
+  return mine.length ? classify(messages, [...statuses, ...mine]) : first
+}
+
 // gh 로 준비 상태의 PR 을 읽어 이벤트의 pr 필드로 옮긴다. 읽지 못하면 null
 function prOf(number: unknown, repo: string): Json | null {
   if (typeof number !== 'number') return null
@@ -958,10 +975,7 @@ async function main(argv: string[]): Promise<number> {
     if (messages.some((m) => wanted.has(String(m.type)))) {
       let suspicious = false
       if (values['completion-contract'] === 'ready' && messages.some((m) => m.type === 'worker_done')) {
-        // 이미 ack 한 준비 상태도 읽는다. --all 은 delivery 를 소비하거나 ack 하지 않는다
-        const history = orcaResult(['check', '--run', runId, '--all'], HISTORY_TIMEOUT_MS)
-        const earlier = history && Array.isArray(history.messages) ? history.messages.map(obj) : []
-        const classified = classify(messages, earlier)
+        const classified = verifyCompletion(messages, runId)
         ;(data as Json).result = { ...result, messages: classified }
         suspicious = classified.some((m) => m.type === 'suspicious_worker_done')
         await workerDone(classified, runId)

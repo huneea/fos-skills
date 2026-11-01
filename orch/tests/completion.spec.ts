@@ -51,6 +51,28 @@ describe('classify', () => {
     assert.equal(body.type, 'worker_done')
   })
 
+  test('SHA 뒤에 같은 줄로 붙인 설명도 근거다', () => {
+    for (const subject of [
+      `준비됨 #626, head ${SHA} (claude-review P3 1건 반영 안 함)`,
+      `준비됨 #626, head ${SHA}. 리뷰 반영`,
+      `준비됨 #626, head ${SHA}, CI 통과`,
+      `준비됨 #626, head ${SHA}; 설명`,
+      `준비됨 #626, head ${SHA}: 설명`,
+      `준비됨 #626, head ${SHA}\t설명`,
+      `준비됨 #626, head ${SHA}(설명)`,
+    ]) {
+      const result = classify([message('worker_done', 2)], [ready({ subject })])[0]
+      assert.equal(result.type, 'worker_done', JSON.stringify(subject))
+      assert.deepEqual(result.completionVerification, { status: 'ready', pr: 626, head: SHA, statusMessageId: 'm1' })
+    }
+  })
+
+  test('SHA 가 40자리보다 길거나 SHA 뒤에 다른 글자가 바로 붙으면 근거가 아니다', () => {
+    for (const subject of [`준비됨 #123, head ${SHA}b`, `준비됨 #123, head ${SHA}설명`, `준비됨 #123, head ${SHA}-설명`]) {
+      assert.equal(classify([message('worker_done', 2)], [ready({ subject })])[0].type, 'suspicious_worker_done', subject)
+    }
+  })
+
   test('다른 Task, Dispatch, 발신자, 나중 상태, 짧은 해시, 줄 중간의 준비됨, 깨진 시각은 근거가 아니다', () => {
     const candidates = [
       ready({ task_id: 'task_old' }),

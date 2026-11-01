@@ -144,6 +144,31 @@ describe('예약', () => {
     assert.equal(ok(reserve(['--module', 'api', '--name', 'add index', '--branch', 'feat-a'])), 'RESERVED api V11 db/api/V11__add_index.sql\n')
   })
 
+  test('--kind java 는 watch 폴더에 대소문자를 지킨 .java 경로를 내고 SQL 과 같은 번호 공간을 쓴다', () => {
+    write(join(repo, '.orch', 'config.json'), JSON.stringify({ migrations: {
+      dirs: { api: 'db/api' }, watch: { api: ['src/main/java/db/migration'] },
+    } }))
+    const java = ['--module', 'api', '--name', 'GroupSettingBackfill', '--kind', 'java', '--branch', 'feat-a']
+    assert.equal(ok(reserve(java)), 'RESERVED api V4 src/main/java/db/migration/V4__GroupSettingBackfill.java\n')
+    assert.equal(ok(reserve(java)), 'RESERVED api V4 src/main/java/db/migration/V4__GroupSettingBackfill.java reused\n')
+    assert.equal(ok(reserve(['--module', 'api', '--name', 'add index', '--branch', 'feat-c'])), 'RESERVED api V5 db/api/V5__add_index.sql\n')
+    assert.deepEqual(reservations().map((r) => r.name), ['GroupSettingBackfill', 'add_index'])
+  })
+
+  test('--kind java 는 watch 폴더가 여럿이면 --dir 로 고르고 dirs 에 없는 모듈도 받는다', () => {
+    write(join(repo, '.orch', 'config.json'), JSON.stringify({ migrations: {
+      dirs: { api: 'db/api' }, watch: { batch: ['batch/java/db/migration', 'batch/legacy/db/migration'] },
+    } }))
+    const args = ['--module', 'batch', '--name', 'Backfill', '--kind', 'java', '--branch', 'feat-a']
+    const missing = reserve(args)
+    assert.equal(missing.status, 2, missing.stdout + missing.stderr)
+    assert.match(missing.stderr, /여럿이라 --dir 로 고른다/)
+    const wrong = reserve([...args, '--dir', 'db/api'])
+    assert.equal(wrong.status, 2, wrong.stdout + wrong.stderr)
+    assert.match(wrong.stderr, /migrations\.watch 에 없다/)
+    assert.equal(ok(reserve([...args, '--dir', 'batch/legacy/db/migration/'])), 'RESERVED batch V1 batch/legacy/db/migration/V1__Backfill.java\n')
+  })
+
   test('base 최고와 다른 브랜치의 열린 PR 을 넘는 번호를 작업 디렉터리의 브랜치로 예약한다', () => {
     git(['checkout', '-q', 'feat-a'])
     const out = ok(reserve(['--module', 'api', '--name', 'Add index'], { cwd: repo }))
@@ -401,6 +426,22 @@ describe('실패', () => {
     const done = reserve(['--module', 'api', '--name', '인덱스 추가', '--branch', 'feat-a'])
     assert.equal(done.status, 2, done.stdout + done.stderr)
     assert.equal(done.stdout, '')
+  })
+
+  test('--kind java 의 이름이 Java 식별자가 아니면 사용법 오류 2 다', () => {
+    write(join(repo, '.orch', 'config.json'), JSON.stringify({ migrations: { dirs: { api: 'db/api' }, watch: { api: ['src/main/java/db/migration'] } } }))
+    const done = reserve(['--module', 'api', '--name', 'group setting', '--kind', 'java', '--branch', 'feat-a'])
+    assert.equal(done.status, 2, done.stdout + done.stderr)
+    assert.match(done.stderr, /Java 식별자/)
+    assert.equal(existsSync(stateFile('migration-reservations.json')), false)
+  })
+
+  test('--kind java 인데 그 모듈의 watch 폴더가 없거나, --kind 가 틀리거나, sql 에 --dir 를 주면 사용법 오류 2 다', () => {
+    for (const extra of [['--kind', 'java'], ['--kind', 'kotlin'], ['--dir', 'db/api']]) {
+      const done = reserve(['--module', 'api', '--name', 'Backfill', '--branch', 'feat-a', ...extra])
+      assert.equal(done.status, 2, `${extra.join(' ')}: ${done.stdout}${done.stderr}`)
+      assert.equal(done.stdout, '')
+    }
   })
 
   test('설정에 없는 모듈은 사용법 오류 2 다', () => {

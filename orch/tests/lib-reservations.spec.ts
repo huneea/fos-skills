@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, test } from 'node:test'
-import { addedPaths, choose, nextVersion, prune, readReservations, reservationsFile, slug, writeReservations } from '../scripts/lib/reservations.ts'
+import { addedPaths, choose, migrationName, migrationPath, nextVersion, prune, readReservations, reservationsFile, slug, writeReservations } from '../scripts/lib/reservations.ts'
 import type { Migration } from '../scripts/lib/auto-merge.ts'
 import type { Reservation } from '../scripts/lib/reservations.ts'
 
@@ -48,6 +48,28 @@ describe('slug', () => {
 
   test('한글만 있으면 비어 Error 다', () => {
     assert.throws(() => slug('한글만'), /빈다/)
+  })
+})
+
+describe('migrationName', () => {
+  test('sql 은 slug 다', () => {
+    assert.equal(migrationName('Add user index', 'sql'), 'add_user_index')
+  })
+
+  test('java 는 대소문자를 지킨다', () => {
+    assert.equal(migrationName('GroupSettingModelBackfill', 'java'), 'GroupSettingModelBackfill')
+    assert.equal(migrationName('_Backfill2', 'java'), '_Backfill2')
+  })
+
+  test('java 이름이 식별자가 아니면 Error 다', () => {
+    for (const name of ['2Backfill', 'Group Setting', 'drop-old', 'Backfill$', '한글', '']) {
+      assert.throws(() => migrationName(name, 'java'), /Java 식별자/, name)
+    }
+  })
+
+  test('경로는 종류에 맞는 확장자를 붙인다', () => {
+    assert.equal(migrationPath('db/api', 'V3', 'add_index', 'sql'), 'db/api/V3__add_index.sql')
+    assert.equal(migrationPath('src/main/java/db/migration', 'V3', 'Backfill', 'java'), 'src/main/java/db/migration/V3__Backfill.java')
   })
 })
 
@@ -152,6 +174,21 @@ describe('choose', () => {
     const got = choose(input({ open, reservations: [res('feat-c', 'V14'), mine] }))
     assert.equal(got.reused, true)
     assert.deepEqual(got.reservation, mine)
+  })
+
+  test('java 면 받은 폴더에 대소문자를 지킨 .java 경로를 낸다', () => {
+    const got = choose(input({ name: 'GroupSettingBackfill', kind: 'java', dir: 'src/main/java/db/migration' }))
+    assert.equal(got.reservation.name, 'GroupSettingBackfill')
+    assert.equal(got.reservation.path, 'src/main/java/db/migration/V15__GroupSettingBackfill.java')
+  })
+
+  test('같은 이름의 SQL 예약을 java 로 다시 부르면 경로가 달라 새로 정하고 renewed 다', () => {
+    const mine = res('feat-a', 'V15', 'backfill')
+    const got = choose(input({ name: 'backfill', kind: 'java', dir: 'src/main/java/db/migration', reservations: [res('feat-c', 'V14'), mine] }))
+    assert.equal(got.reused, false)
+    assert.equal(got.renewed, true)
+    assert.equal(got.reservation.path, 'src/main/java/db/migration/V15__backfill.java')
+    assert.deepEqual(got.list, [res('feat-c', 'V14'), got.reservation])
   })
 
   test('다른 모듈의 번호는 세지 않는다', () => {
