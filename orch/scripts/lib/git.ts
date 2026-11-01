@@ -1,5 +1,6 @@
-// git 호출의 한 벌이다. 주 checkout 찾기, 기준 브랜치 판정, merge-tree 충돌 판정을 한 곳에 둔다.
+// git 호출의 한 벌이다. 주 checkout 찾기, --repo 인자 검사, 기준 브랜치 판정, merge-tree 충돌 판정을 한 곳에 둔다.
 
+import { statSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import { real } from './fs.ts'
 import { run } from './proc.ts'
@@ -20,6 +21,28 @@ export function mainCheckout(repo: string): string {
   const top = git(self, ['rev-parse', '--show-toplevel'])
   const topDir = top.stdout.trim()
   return top.code === 0 && topDir ? real(topDir) : self
+}
+
+// gh 의 --repo 값(owner/name)처럼 보이는지. 점이나 / 로 시작하는 상대·절대 경로는 아니다
+const GH_REPO = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/
+
+// --repo 로 받은 값이 git 작업 트리 안의 디렉터리인지 본다. 맞으면 null, 아니면 사용법 오류의 이유 한 줄이다.
+// 명령은 인자를 읽은 직후, 폴더나 파일을 만들기 전에 부르고 이유가 있으면 종료 코드 2 로 멈춘다.
+// 없는 경로를 그대로 쓰면 설정 파일을 찾지 못해 빈 설정으로 돌고(lib/config.ts 의 loadConfig 는 {} 다),
+// 큐와 로그 폴더를 <작업 디렉터리>/<값>/.orch 아래에 새로 만든다.
+// gh 의 --repo 와 이름이 같아 owner/name 을 주기 쉬워, 그 모양이면 로컬 경로라고 알린다.
+export function repoArgProblem(value: string): string | null {
+  const hint = GH_REPO.test(value) ? ` --repo 는 로컬 경로다. ${value} 는 GitHub 의 owner/name 모양이다. 저장소 체크아웃 경로를 준다` : ''
+  let isDir = false
+  try {
+    isDir = statSync(value).isDirectory()
+  } catch {
+    // 없거나 읽지 못하는 경로다. 아래에서 디렉터리가 아니라고 알린다
+  }
+  if (!isDir) return `--repo 가 디렉터리가 아니다: ${value}.${hint}`
+  const done = git(value, ['rev-parse', '--is-inside-work-tree'])
+  if (done.code !== 0 || done.stdout.trim() !== 'true') return `--repo 가 git 작업 트리가 아니다: ${value}.${hint}`
+  return null
 }
 
 // origin/HEAD 가 가리키는 브랜치 이름(예: main). 읽지 못하면 null 이다.

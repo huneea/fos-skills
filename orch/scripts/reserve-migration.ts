@@ -5,7 +5,8 @@
 //     reserve-migration.ts --repo DIR --module M --name TEXT [--kind sql|java] [--dir DIR] [--branch B] [--base B] [--again]
 //     reserve-migration.ts --repo DIR --prune
 //
-//     --repo    대상 저장소. 주 checkout 으로 바꿔 쓴다. 예약 파일과 잠금은 그 주 checkout 의 <orch 루트>/state/ 에 있다
+//     --repo    대상 저장소. 주 checkout 으로 바꿔 쓴다. 예약 파일과 잠금은 그 주 checkout 의 <orch 루트>/state/ 에 있다.
+//               git 작업 트리 안의 디렉터리가 아니면 사용법 오류다(lib/git.ts 의 repoArgProblem)
 //     --module  config.json 의 migrations.dirs 에 있는 모듈 이름. 없으면 사용법 오류다.
 //               --kind java 면 migrations.dirs 대신 migrations.watch 에 그 모듈이 있어야 한다
 //     --name    마이그레이션 설명. 영문으로 준다. SQL 은 파일 이름 조각(lib/reservations.ts 의 slug)으로 바꿔 비면 사용법 오류다.
@@ -85,7 +86,7 @@ import type { Migration } from './lib/auto-merge.ts'
 import { ConfigError, loadConfig } from './lib/config.ts'
 import { acquireLock, ownsLock, releaseLock } from './lib/events.ts'
 import { ghJson } from './lib/gh.ts'
-import { defaultBase, git, mainCheckout } from './lib/git.ts'
+import { defaultBase, git, mainCheckout, repoArgProblem } from './lib/git.ts'
 import { makeParent } from './lib/paths.ts'
 import { addedPaths, choose, lockFile, migrationName, prune, readReservations, writeReservations } from './lib/reservations.ts'
 import type { MigrationKind, Reservation } from './lib/reservations.ts'
@@ -229,6 +230,8 @@ function parse(argv: string[]): { repo: string; prune: boolean; values: Record<s
   }
   if (values.help) return { repo: '', prune: false, values }
   if (!values.repo) throw new Usage('--repo 가 필요하다')
+  const repoProblem = repoArgProblem(values.repo)
+  if (repoProblem) throw new Usage(repoProblem)
   if (values.prune) {
     const extra = (['module', 'name', 'kind', 'dir', 'branch', 'base'] as const).filter((key) => values[key] !== undefined)
     if (extra.length > 0 || values.again) throw new Usage('--prune 은 --repo 와만 준다')
