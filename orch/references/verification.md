@@ -43,6 +43,7 @@ git diff "origin/$BASE" -- "$FILE"
 `wait-important` 와 `triage-messages` 는 PR 준비 상태가 없는 성공 보고를
 `의심스러운 worker_done` 으로 분류한다. 대기는 종료 코드 6 을 내며 자동 ack 하지 않는다.
 같은 Task·Dispatch·발신자의 앞선 준비 상태에 PR 번호와 전체 HEAD SHA 가 있어야 정상 분류한다.
+준비 상태 줄은 SHA 바로 뒤가 줄 끝이거나 공백, `.`, `,`, `;`, `:`, `(` 면 인정한다. 이력은 `check --all --types status` 로 읽고, 거기서 근거를 찾지 못하면 `inbox` 에서 그 Run 의 행을 다시 찾는다.
 읽기 전용 파일에 이력이 빠졌으면 `triage-messages --live` 로 다시 확인한다.
 
 이 검사는 발신 프로세스 인증이나 지시서 전체의 완료 증명이 아니다.

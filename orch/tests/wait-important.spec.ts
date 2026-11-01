@@ -61,7 +61,14 @@ if (argv.includes('worker-list')) {
   const latest = (st.latest || {})[argv[argv.indexOf('--task') + 1]]
   print({ ok: true, result: latest ? { dispatch: typeof latest === 'object' ? latest : { id: latest } } : {} })
 } else if (argv.includes('--all')) {
-  print({ ok: !st.history_fail, result: { messages: st.history || [] } })
+  // 실제 check --all 처럼 --types 로 좁힌 뒤 최근 100행만 낸다
+  const at = argv.indexOf('--types')
+  const types = at >= 0 ? argv[at + 1].split(',') : null
+  const rows = (st.history || []).filter((m) => !types || types.includes(m.type)).slice(-100)
+  print({ ok: !st.history_fail, result: { messages: rows } })
+} else if (argv[0] === 'orchestration' && argv[1] === 'inbox') {
+  const limit = Number(argv[argv.indexOf('--limit') + 1])
+  print({ ok: true, result: { messages: (st.inbox || []).slice(0, limit) } })
 } else {
   if (process.env.FAKE_PID) fs.appendFileSync(process.env.FAKE_PID, process.pid + '\\n')
   const reply = st.replies.length ? st.replies.shift() : { ok: true, result: { deliveryId: null, messages: [], timedOut: true } }
@@ -135,6 +142,7 @@ type WaitOptions = {
   tasks?: Json[]
   latest?: Json
   history?: Json[]
+  inbox?: Json[]
   contract?: string
   historyFail?: boolean
   cwd?: string
@@ -151,6 +159,7 @@ function wait(replies: Json[], args: string[] = [], opts: WaitOptions = {}, extr
       tasks: opts.tasks ?? [],
       latest: opts.latest ?? {},
       history: opts.history ?? [],
+      inbox: opts.inbox ?? [],
       history_fail: opts.historyFail ?? false,
       screens: opts.screens ?? {},
     }),
@@ -801,6 +810,35 @@ describe('완료 계약', () => {
     assert.equal(r.code, 0, r.stdout + r.stderr)
     assert.match(r.stdout, /"status": "ready"/)
     assert.ok(calls().some((c) => c.includes('--all') && !c.includes('--wait')))
+  })
+
+  test('이력은 status 로 좁혀 읽어 뒤따른 heartbeat 100행에 밀리지 않는다', () => {
+    const beats = Array.from({ length: 120 }, (_, i) => ({ type: 'heartbeat', subject: 'alive', created_at: '2026-10-23T00:00:00Z', ...ids, id: `hb${i}` }))
+    const r = wait([done()], ['--lost-interval-sec', '0'], { contract: 'ready', history: [readyStatus, ...beats] })
+    assert.equal(r.code, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /"status": "ready"/)
+    assert.ok(calls().some((c) => c.includes('--all') && c.join(' ').includes('--types status')))
+    assert.ok(calls().every((c) => !c.includes('inbox')), '근거를 찾았으면 inbox 를 읽지 않는다')
+  })
+
+  test('check --all 의 100행 밖에 있는 근거는 inbox 에서 이 Run 의 행만 골라 찾는다', () => {
+    const others = Array.from({ length: 120 }, (_, i) => ({ ...readyStatus, task_id: `task_other${i}`, id: `s${i}`, created_at: '2026-10-23T00:00:00.500Z' }))
+    const r = wait([done()], ['--lost-interval-sec', '0'], {
+      contract: 'ready',
+      history: [readyStatus, ...others],
+      inbox: [{ ...readyStatus, id: 'inbox_ready', run_id: 'run_x' }],
+    })
+    assert.equal(r.code, 0, r.stdout + r.stderr)
+    assert.match(r.stdout, /"statusMessageId": "inbox_ready"/)
+    const inbox = calls().find((c) => c.includes('inbox'))
+    assert.ok(inbox && inbox.join(' ').includes('--limit 3000'), JSON.stringify(inbox))
+    assert.ok(calls().every((c) => !c.includes('--ack')), '근거를 찾는 조회는 ack 하지 않는다')
+  })
+
+  test('inbox 의 다른 Run 행은 근거가 아니다', () => {
+    const r = wait([done()], ['--lost-interval-sec', '0'], { contract: 'ready', inbox: [{ ...readyStatus, run_id: 'run_other' }] })
+    assert.equal(r.code, 6, r.stdout + r.stderr)
+    assert.match(r.stdout, /의심스러운 worker_done/)
   })
 
   test('준비 상태가 있는 worker_done 은 worker-done 에 ready 와 gh 의 PR 을 넘기고 핸들러 줄이 JSON 앞이다', () => {
