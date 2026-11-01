@@ -143,6 +143,29 @@ test('d 로 펼치면 모든 줄을 적힌 순서대로, 같은 표시 칸과 �
   await ui.unmount()
 })
 
+test('업무 주소가 있으면 제목의 업무 번호에, 저장소 주소를 읽었으면 PR 번호에 밑줄 친 링크를 건다', async ($, on) => {
+  const task = 'https://nhnent.dooray.com/project/tasks/4455909338652535899'
+  const board = JSON.stringify({ items: [
+    { id: 't', title: '#342 감지상황 잇기', status: 'wait', pr: 877, task },
+    { id: 'n', title: '#343 주소 없는 업무', status: 'wait' },
+  ] })
+  const repo = (argv) => argv[0] === 'gh' && argv[1] === 'repo'
+    ? { exitCode: 0, stdout: 'https://github.com/o/r\n', stderr: '' }
+    : { exitCode: 1, stdout: '', stderr: '없음' }
+  await start($, on, repo, board)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-done' })
+  // 저장소 주소는 실제 상태를 읽을 때 채워지므로 PR 링크가 그려질 때까지 기다린다
+  let prLink
+  for (let i = 0; i < 50 && !prLink; i++) prLink = await ui.find({ type: 'Link', text: '#877' })
+  expect(prLink?.props.href).toBe('https://github.com/o/r/pull/877')
+  const taskLink = await ui.find({ type: 'Link', text: '#342' })
+  expect(taskLink?.props.href).toBe(task)
+  expect(((taskLink as Drawn).children[0] as Drawn).props.underline).toBe(true)
+  expect(await ui.find({ type: 'Link', text: '#343' })).toBeFalsy()
+  await ui.unmount()
+})
+
 test('새로 읽기 버튼은 없고 오늘 시작, 정할 것 묻기, 펼치기 버튼을 보인다', async ($, on) => {
   await start($, on)
 
