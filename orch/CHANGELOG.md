@@ -3,6 +3,13 @@
 버전은 `SKILL.md` frontmatter 의 `metadata.version` 과 같은 값을 쓴다.
 올리는 기준과 쓰는 형식은 저장소 README 의 "버전과 변경 이력" 을 따른다.
 
+## 5.10.0 (2026-11-01)
+
+- 일하다 사용자가 뜻을 물은 개념을 `<orch 루트>/study/candidates.md` 에 공부 후보로 모으고, 다시 본 뒤 글로 쓰는 절차를 더했다
+- `study-candidates` 명령이 후보를 더하고(`add`) 상태를 바꾸고(`set`) 목록을 낸다(`list`). 표의 행만 고치고 파일 머리의 글은 그대로 둔다
+- `orch-doctor` 가 상태가 `후보` 나 `리뷰함` 인 후보 수를 `STUDY-OPEN` 으로 낸다. 종료 코드는 바꾸지 않는다
+- 오버레이에 글쓰기 스킬과 글이 놓일 저장소, 하루 끝 정리를 묻는 방식을 적는 「공부 후보」 칸을 더했다
+
 ## 5.9.0 (2026-11-01)
 
 - Codex worker 를 띄울 때 `SSH_AUTH_SOCK` 이 있으면 `launch-worker` 가 그 워크트리에만 `core.sshCommand`(`ssh -o IdentityAgent=<소켓>`)를 둔다
