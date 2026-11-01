@@ -327,11 +327,58 @@ describe('저장소 판정', () => {
     assert.equal(r.stdout, `OK-SCRIPTS 0\nFEEDBACK-OPEN 2 ${dir}\n`)
   })
 
+  test('코디네이터의 coordinator-<YYYYMMDD>.md 도 열린 후보로 센다. 다른 이름의 폴더는 세지 않는다', () => {
+    const dir = join(tmp, '.orch', 'feedback')
+    write(join(dir, 'coordinator-20261101.md'), '## 후보\n')
+    write(join(dir, 'wt-a.md'), '후보\n')
+    write(join(tmp, '.orch', 'skill-feedback', 'wt-b.md'), '후보\n')
+    const r = doctor(['--skip-version', '--skip-questions', '--skill-dir', skill])
+    assert.equal(r.code, 0, r.stdout + r.stderr)
+    assert.equal(r.stdout, `OK-SCRIPTS 0\nFEEDBACK-OPEN 2 ${dir}\n`)
+  })
+
   test('열린 후보가 없거나 폴더가 없으면 FEEDBACK-OPEN 을 내지 않는다', () => {
     const r = doctor(['--skip-version', '--skip-questions', '--skill-dir', skill])
     assert.equal(r.stdout, 'OK-SCRIPTS 0\n')
     write(join(tmp, '.orch', 'feedback', 'reviewed', 'wt-old.md'), '판정함\n')
     assert.equal(doctor(['--skip-version', '--skip-questions', '--skill-dir', skill]).stdout, 'OK-SCRIPTS 0\n')
+  })
+
+  test('공부 후보 표에서 후보와 리뷰함만 세어 STUDY-OPEN 으로 내고 종료 코드는 0 이다', () => {
+    const file = join(tmp, '.orch', 'study', 'candidates.md')
+    const head = '# 공부 후보\n\n| 주제 | 질문 | 생긴 곳 | 참고 | 상태 |\n| --- | --- | --- | --- | --- |\n'
+    const rows = [
+      '| a | 질문 | 곳 | | 후보 |',
+      '| b | 칸 안의 \\| 는 나누지 않는다 | 곳 | | 리뷰함: 다시 나온다 |',
+      '| c | 질문 | 곳 | | 뺌: 이미 글이 있다 |',
+      '| d | 질문 | 곳 | | 글 씀: study/d.md |',
+      '| e | 질문 | 곳 | | 모름 |',
+    ]
+    write(file, `${head}${rows.join('\n')}\n\n| 주제 | 질문 | 생긴 곳 | 참고 | 상태 |\n| --- | --- | --- | --- | --- |\n| 뒤 표 | 질문 | 곳 | | 후보 |\n`)
+    const r = doctor(['--skip-version', '--skip-questions', '--skill-dir', skill])
+    assert.equal(r.code, 0, r.stdout + r.stderr)
+    assert.equal(r.stdout, `OK-SCRIPTS 0\nSTUDY-OPEN 2 ${file}\n`)
+  })
+
+  test('직접 만들어 쓰기 시작한 저장소의 후보 파일을 그대로 읽는다', () => {
+    const file = join(tmp, '.orch', 'study', 'candidates.md')
+    // ai-analysis 의 .orch/study/candidates.md 를 2026-11-01 에 복사한 것이다. 원본은 고치지 않는다
+    write(file, readFileSync(fileURLToPath(new URL('./fixtures/study/candidates.md', import.meta.url)), 'utf8'))
+    const r = doctor(['--skip-version', '--skip-questions', '--skill-dir', skill])
+    assert.equal(r.code, 0, r.stdout + r.stderr)
+    assert.equal(r.stdout, `OK-SCRIPTS 0\nSTUDY-OPEN 8 ${file}\n`)
+  })
+
+  test('열린 공부 후보가 없거나 파일이 없으면 STUDY-OPEN 을 내지 않고, 표 머리가 없으면 stderr 에 알린다', () => {
+    assert.equal(doctor(['--skip-version', '--skip-questions', '--skill-dir', skill]).stdout, 'OK-SCRIPTS 0\n')
+    const file = join(tmp, '.orch', 'study', 'candidates.md')
+    write(file, '| 주제 | 질문 | 생긴 곳 | 참고 | 상태 |\n| --- | --- | --- | --- | --- |\n| a | 질문 | 곳 | | 뺌: 이유 |\n')
+    assert.equal(doctor(['--skip-version', '--skip-questions', '--skill-dir', skill]).stdout, 'OK-SCRIPTS 0\n')
+    write(file, '# 공부 후보\n\n- 표가 아직 없다\n')
+    const r = doctor(['--skip-version', '--skip-questions', '--skill-dir', skill])
+    assert.equal(r.code, 0, r.stdout + r.stderr)
+    assert.equal(r.stdout, 'OK-SCRIPTS 0\n')
+    assert.match(r.stderr, /공부 후보 파일에서 표 머리를 찾지 못했다/)
   })
 
   test('--repo 로 준 저장소를 본다', () => {

@@ -64,7 +64,7 @@
 //     보드 명령이 실패했다
 //
 // 옵션 (저장소마다 다른 값이다. --config 의 JSON 키는 옵션 이름의 하이픈을 밑줄로 바꾼 것이다):
-//     --repo DIR            대상 저장소. 기본은 현재 디렉터리
+//     --repo DIR            대상 저장소. 기본은 현재 디렉터리. git 작업 트리 안의 디렉터리가 아니면 사용법 오류다(lib/git.ts 의 repoArgProblem)
 //     --config FILE         옵션 값을 담은 JSON. 「finish」 절을 읽는다. 없으면 <orch 작업 폴더>/config.json 이 있을 때 쓴다. 명령줄이 우선한다.
 //                           sweep_arg 는 설정의 목록 뒤에 명령줄의 값을 잇는다
 //     --gh-host HOST        gh 와 git 에 줄 GH_HOST (예: github.example.com). 없으면 gh 가 정한다
@@ -118,6 +118,7 @@ import { eventTimeoutSec, fire, handlerFile } from './lib/events.ts'
 import { FINISH_KEYS, FINISH_OPTIONS as OPTIONS } from './lib/finish-options.ts'
 import { real, realPath } from './lib/fs.ts'
 import { gh } from './lib/gh.ts'
+import { repoArgProblem } from './lib/git.ts'
 import { pollSeconds } from './lib/gh-budget.ts'
 import { boardPath, pathOf, requireMigrated } from './lib/paths.ts'
 import { run, runAsync, scriptCommand } from './lib/proc.ts'
@@ -245,6 +246,8 @@ function parse(argv: string[]): Args | null {
   const cli = (name: string) => values[name] as string | undefined
   const configFile = cli('config') ?? null
   const cliRepo = cli('repo') ?? '.'
+  const repoProblem = repoArgProblem(cliRepo)
+  if (repoProblem) throw new Usage(repoProblem)
   const config = section<Record<string, unknown>>(loadConfig(cliRepo, configFile ? { file: configFile } : {}), 'finish', FINISH_KEYS)
   const pick = (name: string): string | null => cli(name) ?? optional(config[name.replaceAll('-', '_')], name.replaceAll('-', '_'))
   const configSweep = config.sweep_arg

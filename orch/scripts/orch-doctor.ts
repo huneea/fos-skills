@@ -47,6 +47,11 @@
 //     하나 이상이면 FEEDBACK-OPEN 줄을 낸다. 다시 보는 주기와 판정은 references/feedback-review.md 가 소유한다.
 //     폴더가 없거나 읽지 못하면 내지 않는다. 경고라 종료 코드를 바꾸지 않는다.
 //
+// 공부 후보 판정(늘 본다):
+//     --repo 의 <orch 루트>/study/candidates.md 표에서 상태가 `후보` 나 `리뷰함` 인 줄을 센다. 표 형식은 lib/study.ts 가 소유한다.
+//     하나 이상이면 STUDY-OPEN 줄을 낸다. 다시 보는 주기와 기준은 references/study-candidates.md 가 소유한다.
+//     파일이 없으면 내지 않는다. 파일은 있는데 표 머리를 찾지 못하면 stderr 에 알리고 내지 않는다. 경고라 종료 코드를 바꾸지 않는다.
+//
 // 설치 기록 판정(늘 본다):
 //     `CLAUDE_CONFIG_DIR`(없으면 `~/.claude`)의 `plugins/installed_plugins.json` 에 적힌 모든 플러그인의 installPath 가 실제로 있는지 본다.
 //     Orca 가 세션을 새 설정 폴더로 열면 기록의 installPath 가 옛 설정 폴더를 가리킨 채 남을 수 있다. 그 경로에 복사본이 없으면
@@ -106,10 +111,11 @@
 //     WORKER-STATE <dispatch> <상태> <근거>       --run 의 살아 있는 dispatch 가운데 user_owned 로 표시된 것의 판정(위 「worker 판정」)
 //     SKIP-WORKERS <이유>                         worker 판정을 하지 못했다
 //     FEEDBACK-OPEN <개수> <폴더>                 다시 보지 않은 스킬 개선 후보 파일이 있다(위 「개선 후보 판정」)
+//     STUDY-OPEN <개수> <파일>                    글을 쓰지도 빼지도 않은 공부 후보가 있다(위 「공부 후보 판정」)
 //     질문이 많은 Run 의 조회 범위 안내는 stderr 로 낸다(lib/questions.ts 머리 주석).
 //
 // 종료 코드:
-//     0  STALE, MISSING, UNANSWERED, INVALID-CONFIG 가 없다(SKIP, UNKNOWN-HOOK, PLUGIN-PATH-MISSING, LOOP-DEAD, LOOP-STALE, WORKER-STATE, FEEDBACK-OPEN, HOOK-FAIL 줄은 있을 수 있다)
+//     0  STALE, MISSING, UNANSWERED, INVALID-CONFIG 가 없다(SKIP, UNKNOWN-HOOK, PLUGIN-PATH-MISSING, LOOP-DEAD, LOOP-STALE, WORKER-STATE, FEEDBACK-OPEN, STUDY-OPEN, HOOK-FAIL 줄은 있을 수 있다)
 //     1  STALE, MISSING, UNANSWERED 나 INVALID-CONFIG 가 있다
 //     2  사용법 오류
 //
@@ -128,6 +134,7 @@ import { isFile, real, realPath } from './lib/fs.ts'
 import { defaultBase, mainCheckout } from './lib/git.ts'
 import { isRegistered, loopStatus, readLoop, recheckMs } from './lib/loop.ts'
 import { pathOf } from './lib/paths.ts'
+import { FILE_NAME as STUDY_FILE, openCount } from './lib/study.ts'
 import { run } from './lib/proc.ts'
 import { shQuote } from './lib/py.ts'
 import { ageSeconds, snapshot } from './lib/questions.ts'
@@ -352,6 +359,17 @@ function checkFeedback(repo: string): string[] {
   return names.length > 0 ? [`FEEDBACK-OPEN ${names.length} ${dir}`] : []
 }
 
+function checkStudy(repo: string): string[] {
+  const file = join(pathOf('study', repo), STUDY_FILE)
+  if (!isFile(file)) return []
+  const count = openCount(file)
+  if (count === null) {
+    process.stderr.write(`orch-doctor: 공부 후보 파일에서 표 머리를 찾지 못했다: ${file}\n`)
+    return []
+  }
+  return count > 0 ? [`STUDY-OPEN ${count} ${file}`] : []
+}
+
 function checkQuestions(runId: string | null): Checked & { pending: string[] } {
   let found
   try {
@@ -500,7 +518,7 @@ async function main(argv: string[]): Promise<number> {
   const version = values['skip-version'] ? { lines: [], code: 0 } : checkVersion(skillDir, values.remote, values.branch as string)
   const scripts = checkScripts(skillDir)
   const installLines = checkInstallPaths(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'))
-  const repoLines = [...checkRepo(repo), ...checkFeedback(repo)]
+  const repoLines = [...checkRepo(repo), ...checkFeedback(repo), ...checkStudy(repo)]
   const questions = values['skip-questions'] ? { lines: [], code: 0, pending: [] } : checkQuestions(runId)
   let loop = runId ? loopStatus(repo, Date.now()) : null
   if (loop && !loop.alive && loop.recheck) {

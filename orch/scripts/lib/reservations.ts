@@ -2,9 +2,9 @@
 // 명령은 reserve-migration.ts, 읽기만 하는 쪽은 상주 루프의 자동 머지다.
 //
 // 파일: <orch 루트>/state/migration-reservations.json
-//   {"reservations": [{"module", "version"(숫자 목록), "label"(`V13`), "branch", "name"(설명의 slug), "path"(저장소 루트 기준 파일 경로), "at"(ISO 8601 UTC)}]}
+//   {"reservations": [{"module", "version"(숫자 목록), "label"(`V13`), "branch", "name"(파일 이름의 설명 조각), "path"(저장소 루트 기준 파일 경로), "at"(ISO 8601 UTC)}]}
 //   (module, version) 은 한 항목에만 있고, (branch, module, name) 도 한 항목에만 있다(docs/data-schema.md 의 행).
-//   name 은 받은 설명을 slug 로 바꾼 값이다. 같은 예약인지 이 값으로 가리고, 파일 이름의 설명 조각도 이 값이다.
+//   name 은 받은 설명을 migrationName 으로 바꾼 값이다. SQL 은 slug, Java 는 받은 이름 그대로다. 같은 예약인지 이 값으로 가린다.
 //   쓰는 쪽은 잠금 안에서 옆 파일(<파일>.<pid>.tmp)에 쓰고 rename 한다. 읽는 쪽은 잠금 없이 읽어도 반쯤 쓴 파일을 보지 않는다.
 //   쓰기나 rename 이 실패하면 옆 파일을 지우고(실패는 무시) 그 오류를 다시 던진다.
 //   최상위가 틀리면(JSON 이 아님, reservations 목록이 없음) Error 다. 부르는 쪽은 읽지 못한 것으로 다룬다.
@@ -18,6 +18,7 @@
 //                  V1_2 처럼 자리가 여럿이어도 새 번호는 V2 다. Flyway 는 V2 를 V1_2 보다 뒤로 정렬한다
 //   - choose       같은 (branch, module, name) 예약이 있고 again 이 아니면 그 예약을 다시 쓴다(reused).
 //                  그 번호가 base 최고 이하가 됐거나 다른 브랜치의 열린 PR 이나 다른 예약과 같은 번호면 새로 정한다(renewed).
+//                  예약의 경로가 이번에 받은 폴더와 종류로 만든 경로와 다르면(SQL 로 받고 Java 로 다시 부름) 새로 정한다(renewed).
 //                  새로 정할 때는 base 최고, 열린 PR 이 더한 그 모듈 마이그레이션, 다시 정하는 예약을 뺀 남은 예약을 모두 센다.
 //                  같은 브랜치의 열린 PR 파일도 세되, 다시 정하는 예약과 같은 (모듈, 번호)인 파일 하나는 뺀다. 그 예약으로 만든 파일이다
 //   - prune        gone 이 true 인 항목만 지운다. null(판정 못 함)과 false 는 남긴다. 지우면 그 번호가 다시 나가기 때문이다
@@ -105,6 +106,12 @@ export function addedPaths(files: unknown): string[] {
   return found
 }
 
+export type MigrationKind = 'sql' | 'java'
+
+const EXTENSIONS: Record<MigrationKind, string> = { sql: '.sql', java: '.java' }
+// Java 마이그레이션의 설명 조각. 파일 이름이 클래스 이름(V<버전>__<이름>)이라 ASCII Java 식별자만 받는다
+const JAVA_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/
+
 // 공백과 - 는 _ 로 바꾸고 영문 소문자, 숫자, _ 밖의 글자는 지운다. 이어진 _ 는 하나로 줄이고 앞뒤의 _ 는 뗀다
 export function slug(name: string): string {
   const out = name
@@ -115,6 +122,19 @@ export function slug(name: string): string {
     .replace(/^_|_$/g, '')
   if (!out) throw new Error(`설명을 파일 이름 조각으로 바꾸면 빈다: ${JSON.stringify(name)}. 영문이나 숫자로 준다`)
   return out
+}
+
+// SQL 은 slug 로 바꾸고, Java 는 대소문자를 지킨 채 식별자인지만 본다. 아니면 Error
+export function migrationName(name: string, kind: MigrationKind): string {
+  if (kind === 'sql') return slug(name)
+  if (!JAVA_NAME.test(name)) {
+    throw new Error(`Java 마이그레이션 이름은 영문자나 _ 로 시작하고 영문자, 숫자, _ 만 쓰는 Java 식별자여야 한다: ${JSON.stringify(name)}. 예: GroupSettingBackfill`)
+  }
+  return name
+}
+
+export function migrationPath(dir: string, label: string, name: string, kind: MigrationKind): string {
+  return `${dir}/${label}__${name}${EXTENSIONS[kind]}`
 }
 
 export function nextVersion(module: string, taken: Migration[]): { version: number[]; label: string } {
@@ -133,22 +153,26 @@ export function choose(input: {
   branch: string
   again: boolean
   dir: string
+  // 기본 sql. java 면 name 을 대소문자 그대로 쓰고 .java 경로를 낸다
+  kind?: MigrationKind
   at: string
   baseMax: Migration | null
   open: { branch: string; migrations: Migration[] }[]
   reservations: Reservation[]
 }): { reservation: Reservation; reused: boolean; renewed: boolean; list: Reservation[] } {
   const { module, branch, baseMax, open, reservations } = input
-  const name = slug(input.name)
+  const kind = input.kind ?? 'sql'
+  const name = migrationName(input.name, kind)
   const mine = reservations.find((r) => r.branch === branch && r.module === module && r.name === name) ?? null
   const rest = reservations.filter((r) => r !== mine)
   const base = baseMax && baseMax.module === module ? baseMax : null
 
   if (mine && !input.again) {
     const stale = base !== null && compareVersion(mine.version, base.version) <= 0
+    const moved = mine.path !== migrationPath(input.dir, mine.label, name, kind)
     const clash =
       open.some((o) => o.branch !== branch && o.migrations.some((m) => same(m, mine))) || rest.some((r) => same(r, mine))
-    if (!stale && !clash) return { reservation: mine, reused: true, renewed: false, list: reservations }
+    if (!stale && !clash && !moved) return { reservation: mine, reused: true, renewed: false, list: reservations }
   }
 
   const taken: Migration[] = base ? [base] : []
@@ -170,7 +194,7 @@ export function choose(input: {
     label: next.label,
     branch,
     name,
-    path: `${input.dir}/${next.label}__${name}.sql`,
+    path: migrationPath(input.dir, next.label, name, kind),
     at: input.at,
   }
   return { reservation, reused: false, renewed: mine !== null && !input.again, list: [...rest, reservation] }

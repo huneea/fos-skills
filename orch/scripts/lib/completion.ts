@@ -3,7 +3,9 @@
 // 이 검사는 발신 프로세스를 인증하지 않는다. Orca 의 settlement 를 바꾸지 않고, 완료 조건의 근거가 없는 신호를
 // 따로 분류해 코디네이터의 해제를 막는다.
 //
-// 준비 상태: 같은 task, dispatch, 발신자의 status 이고 제목이나 본문의 한 줄이 `준비됨 #<PR>, head <40자리 SHA>` 다.
+// 준비 상태: 같은 task, dispatch, 발신자의 status 이고 제목이나 본문의 한 줄이 `준비됨 #<PR>, head <40자리 SHA>` 로 시작한다.
+//   SHA 바로 뒤는 줄 끝이거나 공백, 탭, `.`, `,`, `;`, `:`, `(` 다. worker 가 같은 줄에 붙인 설명(`head <SHA> (리뷰 P3 1건)`)도 인정한다.
+//   SHA 가 40자리보다 길거나 짧으면 근거가 아니다.
 // classify 는 메시지의 복사본에 completionVerification 을 붙인다.
 //   ready           근거가 있다. pr, head, statusMessageId 를 함께 둔다
 //   failure_report  worker_done --outcome failed 같은 실패 보고다. PR 준비를 요구하지 않는다
@@ -15,7 +17,7 @@ type Json = Record<string, unknown>
 
 // 줄 경계는 \n 만이다. 옛 명령(Python re.M)의 ^ 와 $ 는 \n 에서만 줄을 나눴다. JS 의 m 플래그는 \r 과 \u2028 에서도 나눠
 // `준비됨 #1, head <SHA>\r\n` 처럼 옛 명령이 근거로 보지 않던 줄을 근거로 보게 된다
-const READY = /(?<=^|\n)준비됨[ \t]+#([1-9][0-9]*),[ \t]*head[ \t]+([0-9a-f]{40})[ \t]*(?=\n|$)/i
+const READY = /(?<=^|\n)준비됨[ \t]+#([1-9][0-9]*),[ \t]*head[ \t]+([0-9a-f]{40})(?=[ \t.,;:(]|\n|$)/i
 // Python 의 datetime.fromisoformat 이 읽던 꼴이다. 날짜만, 공백 구분, 콜론 없는 시간대도 받는다
 const ISO = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2})?)(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i
 

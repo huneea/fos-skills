@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
-import { conflicts, defaultBase, mainCheckout } from '../scripts/lib/git.ts'
+import { conflicts, defaultBase, mainCheckout, repoArgProblem } from '../scripts/lib/git.ts'
 
 // CI 에는 git 작성자 설정이 없어 커밋이 실패하고, 로컬의 전역 설정은 결과를 바꿀 수 있어 둘 다 고정한다.
 // 라이브러리가 부르는 git 도 같은 값을 받도록 process.env 에 둔다. 테스트 파일마다 프로세스가 나뉘어 다른 파일에 새지 않는다.
@@ -74,6 +74,46 @@ describe('defaultBase', () => {
     const lone = join(tmp, 'lone')
     sh(tmp, 'init', '-q', '-b', 'main', lone)
     assert.equal(defaultBase(lone), null)
+  })
+})
+
+describe('repoArgProblem', () => {
+  test('작업 트리와 그 하위 폴더는 받는다', () => {
+    mkdirSync(join(repo, 'sub'), { recursive: true })
+    assert.equal(repoArgProblem(repo), null)
+    assert.equal(repoArgProblem(join(repo, 'sub')), null)
+  })
+
+  test('없는 경로가 owner/name 모양이면 로컬 경로라고 알린다', () => {
+    const cwd = process.cwd()
+    process.chdir(tmp)
+    try {
+      const got = repoArgProblem('jon890/fos-assistant')
+      assert.match(got ?? '', /디렉터리가 아니다: jon890\/fos-assistant/)
+      assert.match(got ?? '', /--repo 는 로컬 경로다/)
+    } finally {
+      process.chdir(cwd)
+    }
+  })
+
+  test('없는 절대 경로, 파일, git 밖 폴더, bare 저장소는 이유를 낸다. 경로 모양이면 owner/name 안내는 없다', () => {
+    const plain = join(tmp, 'plain')
+    mkdirSync(plain, { recursive: true })
+    const file = join(tmp, 'file.txt')
+    writeFileSync(file, 'x\n')
+    const saved = process.env.GIT_CEILING_DIRECTORIES
+    process.env.GIT_CEILING_DIRECTORIES = tmp
+    try {
+      assert.match(repoArgProblem(join(tmp, 'missing')) ?? '', /디렉터리가 아니다/)
+      assert.match(repoArgProblem(file) ?? '', /디렉터리가 아니다/)
+      assert.match(repoArgProblem(plain) ?? '', /git 작업 트리가 아니다/)
+      assert.match(repoArgProblem(origin) ?? '', /git 작업 트리가 아니다/)
+      assert.doesNotMatch(repoArgProblem(join(tmp, 'missing')) ?? '', /owner\/name/)
+      assert.doesNotMatch(repoArgProblem('./missing/dir') ?? '', /owner\/name/)
+    } finally {
+      if (saved === undefined) delete process.env.GIT_CEILING_DIRECTORIES
+      else process.env.GIT_CEILING_DIRECTORIES = saved
+    }
   })
 })
 

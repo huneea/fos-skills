@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { after, before, describe, test } from 'node:test'
@@ -49,6 +49,8 @@ function setup(t: TestContext): Ctx {
   const tmp = realpathSync(mkdtempSync(join(tmpdir(), 'merge-with-finish-')))
   // 백그라운드로 띄운 가짜 마무리가 지우는 사이에 pid 파일을 쓸 수 있어 ENOTEMPTY 면 다시 지운다
   t.after(() => rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }))
+  // --repo 는 git 작업 트리여야 한다(lib/git.ts 의 repoArgProblem). 실제 저장소처럼 임시 폴더를 저장소로 만든다
+  assert.equal(spawnSync('git', ['init', '-q', tmp]).status, 0)
   writeFileSync(join(tmp, 'queue.sh'), FAKE_QUEUE_SH)
   writeFileSync(join(tmp, 'finish.py'), FAKE_FINISH)
   const logFile = join(tmp, 'log.txt')
@@ -191,6 +193,8 @@ describe('merge-with-finish PR 인자 해석', { skip: !HAS_BASH && 'bash 가 �
 
   test('값을 받는 머지 큐 옵션의 숫자 값은 PR 로 읽지 않고 그대로 넘긴다', async (t) => {
     const c = setup(t)
+    // --repo 5 는 작업 트리 안의 폴더여야 한다(lib/git.ts 의 repoArgProblem)
+    mkdirSync(join(c.tmp, '5'))
     for (const option of QUEUE_VALUE_OPTIONS) {
       c.reset()
       const r = await c.wrap(['--no-finish', '--no-sweep', option, '5', '7'])
@@ -206,6 +210,21 @@ describe('merge-with-finish PR 인자 해석', { skip: !HAS_BASH && 'bash 가 �
       assert.equal(r.code, 2, `${argv.join(' ')}: ${both(r)}`)
     }
     assert.equal(existsSync(c.logFile), false)
+  })
+
+  test('--repo 가 git 작업 트리가 아니면 아무것도 만들거나 걸지 않고 2 다. owner/name 모양이면 로컬 경로라고 알린다', async (t) => {
+    const c = setup(t)
+    const gh = await c.wrap(['--repo', 'jon890/fos-assistant', '449'])
+    assert.equal(gh.code, 2, both(gh))
+    has(gh.stderr, '--repo 는 로컬 경로다')
+    assert.equal(existsSync(join(c.tmp, 'jon890')), false, '잘못된 경로 아래에 폴더를 만들었다')
+    const plain = join(c.tmp, 'plain')
+    mkdirSync(plain)
+    const notRepo = await c.wrap(['--repo', plain, '449'], { GIT_CEILING_DIRECTORIES: c.tmp })
+    assert.equal(notRepo.code, 2, both(notRepo))
+    has(notRepo.stderr, 'git 작업 트리가 아니다')
+    assert.equal(existsSync(c.logFile), false, '머지 큐나 마무리를 걸었다')
+    assert.equal(existsSync(c.logs), false, '마무리 로그 폴더를 만들었다')
   })
 
   test('PR 이 없으면 사용법을 찍고 2 로 끝난다', async (t) => {
@@ -300,8 +319,12 @@ describe('merge-with-finish 마무리', { skip: !HAS_BASH && 'bash 가 필요하
     assert.equal(r.code, 1, both(r))
     has(r.stderr, `마무리를 띄우지 못했다: PR 449: 마무리 스크립트가 없다: ${missing}`)
     lacks(r.stdout, '마무리 시작')
-    // 인터프리터(python3)를 PATH 에서 찾지 못하면 띄우기가 실패한다. 스크립트 파일은 있다
-    r = await c.wrap(['449'], { PATH: join(c.tmp, 'empty-path') })
+    // 인터프리터(python3)를 PATH 에서 찾지 못하면 띄우기가 실패한다. 스크립트 파일은 있다.
+    // --repo 검사가 git 을 부르므로 PATH 에는 git 만 둔다
+    const onlyGit = join(c.tmp, 'only-git')
+    mkdirSync(onlyGit)
+    symlinkSync(spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim(), join(onlyGit, 'git'))
+    r = await c.wrap(['449'], { PATH: onlyGit })
     assert.equal(r.code, 1, both(r))
     has(r.stderr, '마무리를 띄우지 못했다: PR 449: python3 를 실행하지 못했다')
     lacks(r.stdout, '마무리 시작')

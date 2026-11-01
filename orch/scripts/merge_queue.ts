@@ -53,7 +53,8 @@
 // 옵션
 //   옵션은 이름을 다 적어 `--옵션 값` 으로 준다. 옛 merge_queue.py 와 같이 고유 접두로 줄여 쓰거나 `--옵션=값` 으로 붙여 쓸 수 없다.
 //   값은 `-` 로 시작해도 값으로 읽는다. 빈 값은 사용법 오류다. 값을 받는 옵션 목록은 lib/queue-options.ts 가 소유한다
-//   --repo DIR            대상 저장소 경로. 기본은 현재 디렉터리. gh 호스트와 저장소는 이 저장소의 origin 이 정한다
+//   --repo DIR            대상 저장소 경로. 기본은 현재 디렉터리. gh 호스트와 저장소는 이 저장소의 origin 이 정한다.
+//                         gh 의 owner/name 이 아니라 로컬 경로다. git 작업 트리 안의 디렉터리가 아니면 사용법 오류다(lib/git.ts 의 repoArgProblem)
 //                         `gh pr` 는 origin 으로 호스트를 찾지만 `gh api` 는 찾지 않고 기본 호스트(보통 github.com)로 간다.
 //                         그래서 `gh api` 에는 PR URL 의 호스트(`gh pr` 가 origin 으로 정한 값)를 --hostname 으로 넘긴다.
 //                         GH_HOST 환경 변수는 보지 않는다. 전역 GH_HOST 가 다른 호스트를 가리켜도 `gh pr` 와 같은 호스트로 간다
@@ -157,6 +158,7 @@ import { mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } 
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ConfigError, HOOKS_KEYS, loadConfig, PIPELINE_KEYS, section } from './lib/config.ts'
+import { repoArgProblem } from './lib/git.ts'
 import { eventTimeoutSec, fire, handlerFile } from './lib/events.ts'
 import type { FireContext, FireResult } from './lib/events.ts'
 import { apiTarget, checkSnapshot, currentChecks, FAILED_CONCLUSIONS, FAILED_STATES, gh, ghJson, isOwnPr, ownAuthors, parseNames, RULES_JQ, rulesPlanLimited, updateBranch } from './lib/gh.ts'
@@ -1348,6 +1350,8 @@ async function main(argv: string[]): Promise<number> {
     // 옛 명령은 float() 로 읽지 못하면 시작하지 못했다. 빈 값을 0 으로 읽으면 모든 대기가 사라져 체크 대기가 바로 끝난다
     if (!scale.trim() || !Number.isFinite(sleepScale) || sleepScale < 0) throw new Usage(`MERGE_QUEUE_SLEEP_SCALE 는 0 이상의 수다: ${scale}`)
     const opts = parseArgs(argv)
+    const repoProblem = repoArgProblem(opts.repo)
+    if (repoProblem) throw new Usage(repoProblem)
     queue = new Queue(opts)
     active = queue
     queue.setup()

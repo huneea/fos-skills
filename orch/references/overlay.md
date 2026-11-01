@@ -22,7 +22,7 @@
 | 머지 전 명령 | DB 마이그레이션이 든 PR 앞의 백업 명령과 인자, 보관 개수 | 7 |
 | 머지 뒤 명령 | `hooks/after-queue.ts`가 머지 뒤 한 번 돌릴 배포 명령. 문서 PR 만 머지했을 때 건너뛸지(`CODE_PRS`) | 7 |
 | draft 때 건너뛴 체크 | draft 에서 CI 를 건너뛰게 둔 저장소면 `--skipped-is-missing` | 7 |
-| 마이그레이션 순서 | 마이그레이션 PR 끼리의 머지 순서, 모듈별 선후, 공유 DB 에 적용하지 않는 규칙. 번호는 SQL 예약 폴더인 `migrations.dirs` 에 `reserve-migration.ts` 로 예약하고, Java 같은 추가 경로는 `migrations.watch` 로 감시한다 | 2, 7 |
+| 마이그레이션 순서 | 마이그레이션 PR 끼리의 머지 순서, 모듈별 선후, 공유 DB 에 적용하지 않는 규칙. 번호는 `reserve-migration.ts` 로 예약한다. SQL 은 `migrations.dirs` 에, `--kind java` 는 `migrations.watch` 폴더에 경로를 받는다 | 2, 7 |
 | CI runner 장애 대응 | runner 가 offline 이 됐을 때 누가 무엇을 하는지, 끊긴 실행을 다시 돌리는 명령 | 4, 7 |
 | 원격 접속 규칙 | 개발 서버 조회에 쓸 접속 설정, 읽기만 허용하는지 | 2 |
 | 비밀값 규칙 | 읽지 않을 파일, 비밀값을 넘기는 방법 | 2 |
@@ -30,6 +30,7 @@
 | 머지 뒤 정리에서 지울 문서 위치 | 지시서 사본, 설계 메모, PR 본문을 두는 폴더 | 7 |
 | 지시서 폴더 | `cleanup-sweep.ts --specs-dir` 에 줄 경로. worktree 이름과 같은 지시서와, 그 부모 폴더에 남은 옛 위치의 PR 본문 파일 `pr-<이름>.md` 를 지운다. 새 PR 본문 파일은 worker 세션 임시 폴더에 있어 이 폴더에 생기지 않는다 (예: `.orch/specs/`) | 4, 7 |
 | spec-lint | `## spec-lint` 절에 코디네이터 소유 경로, 소유 계약, 금지 문구. 형식은 `scripts/spec-lint.ts` 머리 주석. 오버레이가 가리키는 경로는 `--check-overlay` 가 `origin/<base>` 와 대조한다 | 2 |
+| 공부 후보 | 리뷰한 후보를 글로 쓸 스킬 이름과 글이 놓일 저장소, 하루 끝 정리를 코디네이터가 먼저 물을지와 묻는 말. 없으면 사용자가 요청할 때만 모으고, 글을 쓸 때 어디에 쓸지 묻는다. 절차는 [`study-candidates.md`](study-candidates.md) | - |
 | 진행 보드 | 보드 파일 위치, 목표 항목 id(`board-sync.ts --goal`). `--goal-items` 는 하위 호환 옵션이라 새 설정에 쓰지 않는다 | 4, 7 |
 | 머지 뒤 마무리 | `<repo>/.orch/config.json` 의 `finish` 절. gh 호스트, Run id, 배포 워크플로 파일과 브랜치, 업무 번호를 PR 제목에서 뽑는 정규식, 업무 완료 명령 틀, 보드 파일과 지시서 폴더. 키는 아래 표가 소유한다 | 7 |
 | 산출물 정리 | 같은 파일의 `cleanup` 절. 함께 정리할 미리보기 폴더, 보드 파일, 휴지통 폴더, 기준 일수 | 7 |
@@ -74,7 +75,7 @@
 | `pipeline` | `tick_sec` | 상주 루프의 틱 간격(초)이다. 양수이고 기본 300 이다. `orch-loop.ts` 가 읽는다 |
 | `pipeline` | `enabled`, `docs_merge`, `after_queue_interval_sec`, `ci_missing_after_sec`, `update_behind_drafts` | 상주 루프의 자동 진행에 쓸 값이다. 키는 사용법 오류 없이 받지만 아직 읽는 명령이 없다 |
 | `heavy` | `exclusive`, `normal`, `light`, `wait_idle` | 정규식 목록이다. `heavy-slot.ts` 가 읽는다. 사용법은 [`heavy-checks.md`](heavy-checks.md) 가 소유한다 |
-| `migrations` | `dirs`, `watch`, `before`, `blocked_after_sec` | SQL 예약 폴더, 모듈별 추가 감시 경로 목록, 자동 머지의 머지 전 명령, 막힘 알림 시간 |
+| `migrations` | `dirs`, `watch`, `before`, `blocked_after_sec` | SQL 예약 폴더, 모듈별 추가 감시 경로 목록(Java 예약 폴더), 자동 머지의 머지 전 명령, 막힘 알림 시간 |
 | `board` | `steps` | 띄울 때 만드는 보드 마일스톤 단계의 문자열 목록. 줄 앞 꼬리표 `[pr]`, `[merge]`, `[deploy]`, `[release]` 가 그 단계를 끝낼 사건이다. 없으면 `[pr] PR`, `[merge] 머지` 다. 규칙은 [`board.md`](board.md) 의 「마일스톤 단계」 가 소유한다 |
 | `board` | `done_after` | 보드 항목을 done 으로 바꾸는 사건. `merge`, `deploy`, `release` 중 하나이고 기본은 `merge` 다 |
 | `review` | `prepare` | 리뷰 worker 를 띄울 때 PR head 의 워크트리에서 한 번 돌리는 생성물 준비 명령(bash 문자열). 쓰는 법은 [`spec-writing.md`](spec-writing.md) 의 「리뷰 worker 지시서」 가 소유한다 |
@@ -122,6 +123,7 @@ orch 의 파일은 주 checkout 의 `.orch/` 아래에 둔다. 워크트리에�
 | `hooks/` | 이벤트 핸들러 `<이벤트>.ts`. 쓰는 법은 [`hooks.md`](hooks.md) |
 | `bin/` | 저장소 포장 스크립트 |
 | `feedback/` | worker 가 쌓은 스킬 개선 후보. 다시 보는 법은 [`feedback-review.md`](feedback-review.md) |
+| `study/` | 일하다 생긴 공부 후보 `candidates.md`. 모으고 다시 보는 법은 [`study-candidates.md`](study-candidates.md) |
 
 ## 저장소 스크립트에서 orch 부르기
 
@@ -188,6 +190,7 @@ ORCH=$(node -e 'const fs=require("fs"),os=require("os");const d=process.env.CLAU
 - draft PR 은 CI 를 돌리지 않는다. worker 는 `gh pr create --draft` 로 열고, 코디네이터가 `ci-ready.ts` 로 ready 로 바꾼다
 - 머지 전 명령: DB 마이그레이션이 든 PR 은 `PR:./bin/backup-db.sh <db> "before-pr-$PR"`. DB 마다 최근 2개만 보관
 - CI runner 가 offline 이면 묻지 않고 runner 호스트를 재부팅하고, 끊긴 실행은 `gh run rerun --failed` 로 다시 돌린다
+- 공부 후보: 글쓰기 스킬은 `blog-writer`, 글은 `~/blog` 저장소에 둔다. 하루 끝에 코디네이터가 「오늘 나온 개념을 정리할까요」 로 먼저 묻는다
 ```
 
 자동 머지를 켠 저장소의 `config.json` 조각이다.
@@ -203,4 +206,6 @@ ORCH=$(node -e 'const fs=require("fs"),os=require("os");const d=process.env.CLAU
 }
 ```
 
-`dirs`는 `reserve-migration.ts`가 SQL 파일 경로를 만드는 자리이고 자동 감시에도 들어간다. `watch`는 같은 모듈에 더할 감시 전용 폴더 목록이다. 따라서 위 설정은 Java 경로의 Flyway 번호도 SQL 예약과 같은 번호 공간으로 보지만, 예약 파일은 계속 `modules/api/src/main/resources/db/migration`에 만든다. `watch`에만 적은 모듈은 감시는 되지만 예약 폴더가 없어 번호를 예약할 수 없다.
+`dirs`는 `reserve-migration.ts`가 SQL 파일 경로를 만드는 자리이고 자동 감시에도 들어간다. `watch`는 같은 모듈에 더할 감시 폴더 목록이다. 따라서 위 설정은 Java 경로의 Flyway 번호도 SQL 예약과 같은 번호 공간으로 본다.
+Java 마이그레이션은 `reserve-migration.ts --kind java` 로 받는다. 그 모듈의 `watch` 폴더(여럿이면 `--dir` 로 고른 것)에 `V<버전>__<이름>.java` 를 낸다. Flyway 는 클래스 이름을 파일 이름으로 쓰므로 이름은 대소문자를 지키고, Java 식별자가 아니면 사용법 오류다.
+`watch`에만 적은 모듈은 `--kind java` 로만 예약할 수 있다.

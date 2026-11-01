@@ -3,6 +3,27 @@
 버전은 `SKILL.md` frontmatter 의 `metadata.version` 과 같은 값을 쓴다.
 올리는 기준과 쓰는 형식은 저장소 README 의 "버전과 변경 이력" 을 따른다.
 
+## 5.10.0 (2026-11-01)
+
+- 일하다 사용자가 뜻을 물은 개념을 `<orch 루트>/study/candidates.md` 에 공부 후보로 모으고, 다시 본 뒤 글로 쓰는 절차를 더했다
+- `study-candidates` 명령이 후보를 더하고(`add`) 상태를 바꾸고(`set`) 목록을 낸다(`list`). 표의 행만 고치고 파일 머리의 글은 그대로 둔다
+- `orch-doctor` 가 상태가 `후보` 나 `리뷰함` 인 후보 수를 `STUDY-OPEN` 으로 낸다. 종료 코드는 바꾸지 않는다
+- 오버레이에 글쓰기 스킬과 글이 놓일 저장소, 하루 끝 정리를 묻는 방식을 적는 「공부 후보」 칸을 더했다
+
+## 5.9.0 (2026-11-01)
+
+- Codex worker 를 띄울 때 `SSH_AUTH_SOCK` 이 있으면 `launch-worker` 가 그 워크트리에만 `core.sshCommand`(`ssh -o IdentityAgent=<소켓>`)를 둔다
+- Codex 의 `inherit = "core"` 설정 때문에 worker 의 `git fetch`·`git push` 가 `Permission denied (publickey)` 로 막히던 것을 막는다
+- 사용자가 이미 정한 `core.sshCommand` 는 덮지 않는다. Claude worker 에는 설정하지 않는다
+
+## 5.8.0 (2026-11-01)
+
+- `reserve-migration --kind java` 가 그 모듈의 `migrations.watch` 폴더(여럿이면 `--dir` 로 고른 것)에 `V<버전>__<이름>.java` 경로를 예약한다. 이름은 대소문자를 지키고 Java 식별자가 아니면 사용법 오류다
+- 머지 큐, 마무리, 예약 명령은 `--repo` 가 git 작업 트리가 아니면 무엇을 만들기 전에 종료 코드 2 로 멈춘다. `owner/name` 모양이면 로컬 경로를 달라고 안내한다
+- 완료 계약이 `준비됨 #N, head <SHA> (설명)` 처럼 SHA 뒤에 같은 줄로 붙인 설명도 근거로 인정한다. 공통 지시서 틀은 설명을 다음 줄에 쓰라고 안내한다
+- `wait-important` 가 완료 근거를 `check --all --types status` 로 찾고, 없으면 `inbox` 에서 그 Run 의 행을 다시 찾는다. 긴 실행에서 heartbeat 에 밀려 정상 완료가 종료 코드 6 으로 끝나지 않는다
+- 코디네이터가 겪은 스킬 개선 후보도 `<orch 루트>/feedback/coordinator-<YYYYMMDD>.md` 에 쌓는다
+
 ## 5.7.0 (2026-10-31)
 
 - `worker-ask` 가 ask 를 기다리는 동안 30초마다 status 답을 찾아, 오면 시간 제한을 기다리지 않고 3 으로 끝난다
