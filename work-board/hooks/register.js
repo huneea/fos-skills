@@ -34,6 +34,19 @@ function loadRepoUrl($) {
     .finally(() => { repoUrlLoading = false })
 }
 
+// 업무 주소 앞에 붙일 머리말. 두레이 주소면 「두레이」, 그 밖은 「업무」 다
+export function taskTag(url) {
+  return /(^|\.)dooray\.com$/.test(hostOf(url)) ? '두레이' : '업무'
+}
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ''
+  }
+}
+
 // 항목의 pr 칸(숫자 하나나 「492, 495」 문자열)에서 PR 번호를 모두 뽑는다
 export function prNumbers(value) {
   if (typeof value === 'number') return [value]
@@ -314,7 +327,7 @@ export function unmappedWorkers(items, workers) {
 // worker 한 줄: 워크트리, 붙은 PR 과 CI, ready 가 아닌 상태.
 export function workerLine(worker, prs) {
   const pr = prFor(worker, prs)
-  return (worker.worktree || worker.id) + (pr ? '  #' + pr.number + ' ' + checkSummary(pr) : '')
+  return (worker.worktree || worker.id) + (pr ? '  PR #' + pr.number + ' ' + checkSummary(pr) : '')
     + (worker.state && worker.state !== 'ready' ? '  ' + worker.state : '')
 }
 
@@ -664,16 +677,20 @@ export function register(on) {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== PANE) return next(e)
     const { Box, Text, Button, Link } = $.ui.resolve(e)
-    // 밑줄 친 링크. 주소가 없으면 글자만 그린다
-    const link = (key, href, label) => href
-      ? Link({ key, href, children: [Text({ underline: true, children: [label] })] })
-      : Text({ key, children: [label] })
-    const prLink = (n) => link('pr-' + n, repoUrl ? repoUrl + '/pull/' + n : '', '#' + n)
-    // 제목 안의 업무 번호(「#342」)에만 업무 링크를 건다. 항목에 업무 주소(task)가 없으면 제목 그대로다
+    // 머리말(「두레이」나 「업무」, 「PR」)과 번호를 대괄호로 감싸 제목과 가르고, 밑줄 친 링크와 색으로도 가린다. 주소가 없으면 글자만 그린다
+    const TAG_COLORS = { PR: 'magenta' }
+    const tagged = (key, tag, href, label) => {
+      const look = { underline: Boolean(href), color: TAG_COLORS[tag] || 'cyan' }
+      return href
+        ? Link({ key, href, children: [Text({ ...look, children: ['[' + tag + ' ' + label + ']'] })] })
+        : Text({ key, color: look.color, children: ['[' + tag + ' ' + label + ']'] })
+    }
+    const prLink = (n) => tagged('pr-' + n, 'PR', repoUrl ? repoUrl + '/pull/' + n : '', '#' + n)
+    // 제목 안의 업무 번호(「#342」)에만 머리말과 업무 링크를 건다. 항목에 업무 주소(task)가 없으면 제목 그대로다
     const titleChildren = (item) => {
       const title = item.title || item.id
       const parts = typeof item.task === 'string' && /^https?:\/\//.test(item.task) ? splitTaskNumber(title) : null
-      return parts ? [parts[0], link('task', item.task, parts[1]), parts[2]] : [title]
+      return parts ? [parts[0], tagged('task', taskTag(item.task), item.task, parts[1]), parts[2]] : [title]
     }
     const items = board && Array.isArray(board.items) ? board.items : []
 

@@ -131,7 +131,7 @@ test('d 로 펼치면 모든 줄을 적힌 순서대로, 같은 표시 칸과 �
   expect(rows[1].body.props.strikethrough).toBeUndefined()
   expect(rows[2].body.props ?? {}).toEqual({})
   expect(rows[3].body.props.dimColor).toBe(true)
-  expect(await ui.find({ type: 'Text', text: /worker  ·  #9/ })).toBeTruthy()
+  expect(await ui.find({ type: 'Text', text: /worker  ·  \[PR #9\]/ })).toBeTruthy()
   // details 의 끝낸 단계도 같은 모양이다
   const wait = await ui.find({ type: 'Box', key: 'item-c' })
   const first = stepParts((wait.children as Drawn[]).find((child) => child.props.key === 's-0'))
@@ -157,12 +157,17 @@ test('업무 주소가 있으면 제목의 업무 번호에, 저장소 주소를
   await ui.press({ key: 'toggle-done' })
   // 저장소 주소는 실제 상태를 읽을 때 채워지므로 PR 링크가 그려질 때까지 기다린다
   let prLink
-  for (let i = 0; i < 50 && !prLink; i++) prLink = await ui.find({ type: 'Link', text: '#877' })
+  for (let i = 0; i < 50 && !prLink; i++) prLink = await ui.find({ type: 'Link', text: '[PR #877]' })
   expect(prLink?.props.href).toBe('https://github.com/o/r/pull/877')
-  const taskLink = await ui.find({ type: 'Link', text: '#342' })
+  const taskLink = await ui.find({ type: 'Link', text: '[두레이 #342]' })
   expect(taskLink?.props.href).toBe(task)
-  expect(((taskLink as Drawn).children[0] as Drawn).props.underline).toBe(true)
-  expect(await ui.find({ type: 'Link', text: '#343' })).toBeFalsy()
+  expect(((taskLink as Drawn).children[0] as Drawn).props).toMatchObject({ underline: true, color: 'cyan' })
+  expect(((prLink as Drawn).children[0] as Drawn).props).toMatchObject({ underline: true, color: 'magenta' })
+  expect(await ui.find({ type: 'Link', text: /#343/ })).toBeFalsy()
+  // 업무와 PR 을 머리말로 가린다
+  const title = textOf(await ui.find({ type: 'Box', key: 'item-t' }) as Drawn)
+  expect(title).toContain('[두레이 #342] 감지상황 잇기')
+  expect(title).toContain('[PR #877]')
   await ui.unmount()
 })
 
