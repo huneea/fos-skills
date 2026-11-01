@@ -32,6 +32,10 @@
 //        활성 지시서를 읽지 못하면 경고하고 이 지시서 하나만 검사한다. spec-lint 가 1 이 아닌 코드로 끝나도(저장소를 읽지 못함 같은 것) 경고만 하고 진행한다
 //        SPEC_LINT 로 spec-lint 를 바꾼다
 //     2. 워크트리를 만들거나 확인한다
+//     2-0. --agent codex 이고 코디네이터 환경에 SSH_AUTH_SOCK 이 있으면 그 워크트리에만 걸리는 git 설정 core.sshCommand 에
+//        `ssh -o IdentityAgent=<소켓>` 을 둔다(lib/ssh-agent.ts). Codex 의 `inherit = "core"` 가 SSH_AUTH_SOCK 을 빼 git 의 SSH 인증이
+//        막히는 것을 막는다. worker-start 에는 Codex 인자(-c)를 넘길 옵션이 없다. 이미 정한 core.sshCommand 는 덮지 않고, 설정이 실패해도 띄운다.
+//        Claude worker 에는 하지 않는다. 소켓이 바뀌어도 환경 변수는 따라가지만 설정에 박은 경로는 낡는다
 //     2-1. 리뷰 worker 준비. 지시서에 `리뷰 PR: #<N>` 줄(lib/review.ts 의 reviewPrOfSpec)이 있을 때만 한다. 새 워크트리도 --worktree 도 같다.
 //        PR head 는 이 프로세스가 주 checkout 에서 `git fetch origin +refs/pull/<N>/head:refs/orch/review/pr-<N>` 로 받는다.
 //        worker 가 직접 fetch 하지 않게 하려는 것이다. 원격이 SSH 별칭이면 worker 세션에서는 인증이 막혔다(10-31 실측).
@@ -101,6 +105,7 @@ import { requireMigrated } from './lib/paths.ts'
 import { runAsync, scriptCommand } from './lib/proc.ts'
 import type { RunResult } from './lib/proc.ts'
 import { shQuote } from './lib/py.ts'
+import { configureSshAgent } from './lib/ssh-agent.ts'
 import { reviewPrOfSpec } from './lib/review.ts'
 import { liveSpecPaths, SELECTION_FORMAT, selectionsOf } from './lib/spec.ts'
 
@@ -468,6 +473,13 @@ async function main(argv: string[]): Promise<number> {
       out(`거부: 이 워크트리에 터미널이 남아 있다. 끝났는지 보고 orca terminal close --terminal <handle> 로 닫은 뒤 다시 띄운다\n${left}`)
       return 1
     }
+  }
+
+  if (passValue(passthru, '--agent') === 'codex') {
+    const ssh = configureSshAgent(worktree, process.env.SSH_AUTH_SOCK)
+    if (ssh.status === 'set') out(`SSH-AGENT 워크트리 core.sshCommand 를 설정했다: ${ssh.command}`)
+    else if (ssh.status === 'failed') err(`경고: ssh-agent 설정을 건너뛴다. ${ssh.reason}`)
+    else if (ssh.reason.startsWith('core.sshCommand')) err(`SSH-AGENT 건너뜀: ${ssh.reason}`)
   }
 
   const repo = a.repo || mainCheckout(worktree)

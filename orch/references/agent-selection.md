@@ -140,3 +140,6 @@ codex debug models | python3 -c "import json,sys; d=json.load(sys.stdin); [print
 
 `~/.codex/models_cache.json` 은 읽지 않는다. 대화형 codex 를 띄울 때만 갱신돼 새 모델이 빠진다.
 기본 service tier 가 `priority`(Fast)일 수 있고, Fast 는 사용량이 늘어난다. 실제 적용 값은 `worker-start` 응답의 `launch.effective` 로 확인한다.
+사용자의 `~/.codex/config.toml` 에 `[shell_environment_policy] inherit = "core"` 가 있으면 Codex 가 띄우는 셸에서 `SSH_AUTH_SOCK` 이 빠져 worker 의 `git fetch`·`git push` 가 `Permission denied (publickey)` 로 막힌다.
+`launch-worker` 는 `--agent codex` 이고 코디네이터 환경에 `SSH_AUTH_SOCK` 이 있으면 그 워크트리에만 걸리는 `core.sshCommand`(`ssh -o IdentityAgent=<소켓>`)를 둔다. 사용자가 이미 정한 `core.sshCommand` 는 덮지 않는다.
+`worker-start` 에는 Codex 실행 인자(`-c shell_environment_policy.set.*`)를 넘기는 옵션이 없어 환경 변수로 되돌릴 수 없다. Orca 에 인자 전달이 생기면 그쪽으로 옮긴다.

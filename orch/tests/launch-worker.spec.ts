@@ -1515,3 +1515,55 @@ describe('spec-lint 관문', () => {
     assert.deepEqual(lines('make '), [])
   })
 })
+
+describe('Codex worker 의 ssh-agent 설정', () => {
+  let proj: string
+  let wt: string
+
+  const gitOut = (cwd: string, ...args: string[]) => spawnSync('git', ['-C', cwd, ...args], { env, encoding: 'utf8' })
+
+  // lib-ssh-agent.spec.ts 가 설정 함수를 따로 본다. 여기서는 launch-worker 가 Codex 에만 부르는지 본다.
+  beforeEach(() => {
+    proj = join(tmp, 'sshproj')
+    wt = join(tmp, 'sshwt')
+    assert.equal(spawnSync('git', ['init', '-q', '-b', 'main', proj], { env }).status, 0)
+    assert.equal(gitOut(proj, 'commit', '-q', '--allow-empty', '-m', 'init').status, 0)
+    assert.equal(gitOut(proj, 'worktree', 'add', '-q', '-b', 'feature/ssh', wt).status, 0)
+    env.FAKE_WT_DEFAULT = `${wt}`
+    state({ next_ids: ['ctx_1'], dispatches: { ctx_1: shown('input_accepted') } })
+  })
+
+  test('codex 면 그 워크트리에만 core.sshCommand 를 두고 공유 설정은 그대로다', () => {
+    env.SSH_AUTH_SOCK = '/tmp/agent.sock'
+    const r = launch(['--worktree', wt, '--', ...CODEX])
+    assert.equal(r.code, 0, both(r))
+    assert.equal(gitOut(wt, 'config', '--worktree', '--get', 'core.sshCommand').stdout.trim(), 'ssh -o IdentityAgent=/tmp/agent.sock')
+    assert.equal(gitOut(proj, 'config', '--local', '--get', 'core.sshCommand').status, 1)
+    assert.equal(gitOut(proj, 'config', '--get', 'core.sshCommand').status, 1)
+    assert.match(r.stdout, /SSH-AGENT/)
+  })
+
+  test('claude 면 설정하지 않는다', () => {
+    env.SSH_AUTH_SOCK = '/tmp/agent.sock'
+    const r = launch(['--worktree', wt, '--', ...CLAUDE])
+    assert.equal(r.code, 0, both(r))
+    assert.equal(gitOut(wt, 'config', '--get', 'core.sshCommand').status, 1)
+    assert.equal(gitOut(wt, 'config', '--local', '--get', 'extensions.worktreeConfig').status, 1)
+  })
+
+  test('SSH_AUTH_SOCK 이 없으면 codex 여도 설정하지 않는다', () => {
+    delete env.SSH_AUTH_SOCK
+    const r = launch(['--worktree', wt, '--', ...CODEX])
+    assert.equal(r.code, 0, both(r))
+    assert.equal(gitOut(wt, 'config', '--get', 'core.sshCommand').status, 1)
+  })
+
+  test('사용자가 정한 core.sshCommand 는 덮지 않고 알린다', () => {
+    env.SSH_AUTH_SOCK = '/tmp/agent.sock'
+    assert.equal(gitOut(proj, 'config', '--local', 'core.sshCommand', 'ssh -i /my/key').status, 0)
+    const r = launch(['--worktree', wt, '--', ...CODEX])
+    assert.equal(r.code, 0, both(r))
+    assert.equal(gitOut(wt, 'config', '--get', 'core.sshCommand').stdout.trim(), 'ssh -i /my/key')
+    assert.match(r.stderr, /SSH-AGENT 건너뜀/)
+  })
+})
