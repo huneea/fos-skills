@@ -2,19 +2,26 @@
 // 파일은 만들지 않는다. 경로만 돌려주고 worker 가 그 이름으로 만든다. 명령이 만들면 다른 worktree 의 경로와 섞인다.
 //
 // 사용법:
-//     reserve-migration.ts --repo DIR --module M --name TEXT [--branch B] [--base B] [--again]
+//     reserve-migration.ts --repo DIR --module M --name TEXT [--kind sql|java] [--dir DIR] [--branch B] [--base B] [--again]
 //     reserve-migration.ts --repo DIR --prune
 //
 //     --repo    대상 저장소. 주 checkout 으로 바꿔 쓴다. 예약 파일과 잠금은 그 주 checkout 의 <orch 루트>/state/ 에 있다
-//     --module  config.json 의 migrations.dirs 에 있는 모듈 이름. 없으면 사용법 오류다
-//     --name    마이그레이션 설명. 영문으로 준다. 파일 이름 조각(lib/reservations.ts 의 slug)으로 바꿔 비면 사용법 오류다
+//     --module  config.json 의 migrations.dirs 에 있는 모듈 이름. 없으면 사용법 오류다.
+//               --kind java 면 migrations.dirs 대신 migrations.watch 에 그 모듈이 있어야 한다
+//     --name    마이그레이션 설명. 영문으로 준다. SQL 은 파일 이름 조각(lib/reservations.ts 의 slug)으로 바꿔 비면 사용법 오류다.
+//               Java 는 대소문자를 지켜 클래스 이름 조각으로 쓰고, ASCII Java 식별자가 아니면 사용법 오류다(lib/reservations.ts 의 migrationName)
+//     --kind    sql(기본)이나 java. sql 은 migrations.dirs 의 폴더에 `V<버전>__<slug>.sql` 을,
+//               java 는 그 모듈의 migrations.watch 폴더에 `V<버전>__<이름>.java` 를 낸다. Flyway Java 마이그레이션은 클래스 이름이 파일 이름이다
+//     --dir     --kind java 에서 그 모듈의 migrations.watch 폴더가 여럿일 때 고른다. 하나면 생략한다.
+//               목록에 없는 폴더, 여럿인데 생략, --kind sql 과 함께 주면 사용법 오류다
 //     --branch  예약할 브랜치. 기본은 작업 디렉터리의 `git branch --show-current` 다. worker 는 자기 worktree 에서 부른다. 비면 사용법 오류다
 //     --base    기준 브랜치. 기본은 origin/HEAD(lib/git.ts 의 defaultBase), 그것도 없으면 main 이다
 //     --again   같은 브랜치, 모듈, 설명의 예약을 버리고 새 번호를 받는다
 //     --prune   번호를 받지 않고 정리만 한다. 형식이 틀린 예약도 파일에서 뺀다. --repo 밖의 옵션과 함께 주면 사용법 오류다
 //     옵션은 고유 접두로 줄여 쓸 수 있다(lib/args.ts)
 //
-// 번호: base 최고, 열린 PR 이 더한 그 모듈 마이그레이션, 남은 예약 가운데 가장 큰 것의 첫 자리에 1 을 더한다.
+// 번호: SQL 과 Java 는 같은 모듈의 번호 공간을 함께 쓴다(dirs 와 watch 를 모두 센다).
+//     base 최고, 열린 PR 이 더한 그 모듈 마이그레이션, 남은 예약 가운데 가장 큰 것의 첫 자리에 1 을 더한다.
 //     같은 브랜치, 모듈, 설명의 예약이 있으면 그 예약을 다시 준다. 그 번호가 base 최고 이하가 됐거나(다른 PC 에서 같은 번호가 머지됨)
 //     다른 브랜치의 열린 PR 이나 다른 예약과 같으면 새로 정한다. 판정은 lib/reservations.ts 의 choose 가 소유한다.
 //     열린 PR 은 base 를 가리지 않고 모두 센다. 다른 base 로 가는 PR 의 번호도 나중에 같은 base 에 모일 수 있어 피하는 쪽을 고른다.
@@ -80,11 +87,11 @@ import { acquireLock, ownsLock, releaseLock } from './lib/events.ts'
 import { ghJson } from './lib/gh.ts'
 import { defaultBase, git, mainCheckout } from './lib/git.ts'
 import { makeParent } from './lib/paths.ts'
-import { addedPaths, choose, lockFile, prune, readReservations, slug, writeReservations } from './lib/reservations.ts'
-import type { Reservation } from './lib/reservations.ts'
+import { addedPaths, choose, lockFile, migrationName, prune, readReservations, writeReservations } from './lib/reservations.ts'
+import type { MigrationKind, Reservation } from './lib/reservations.ts'
 
 const USAGE = [
-  '사용법: reserve-migration.ts --repo DIR --module M --name TEXT [--branch B] [--base B] [--again]',
+  '사용법: reserve-migration.ts --repo DIR --module M --name TEXT [--kind sql|java] [--dir DIR] [--branch B] [--base B] [--again]',
   '        reserve-migration.ts --repo DIR --prune',
 ].join('\n')
 const LOCK_WAIT_MS = 10_000
@@ -93,7 +100,16 @@ const OPEN_LIMIT = 200
 
 class Usage extends Error {}
 
-type Target = { module: string; name: string; branch: string; base: string; again: boolean; dir: string; watched: Record<string, string[]> }
+type Target = {
+  module: string
+  name: string
+  kind: MigrationKind
+  branch: string
+  base: string
+  again: boolean
+  dir: string
+  watched: Record<string, string[]>
+}
 type Presence = 'present' | 'absent' | null
 // 정리 판정. merged 는 예약 뒤 머지, gone 은 브랜치가 원격과 로컬에 모두 없음이라 지운다. false 남김, null 판정 못 함
 type Verdict = 'merged' | 'gone' | false | null
@@ -197,6 +213,8 @@ function parse(argv: string[]): { repo: string; prune: boolean; values: Record<s
     repo: { type: 'string' },
     module: { type: 'string' },
     name: { type: 'string' },
+    kind: { type: 'string' },
+    dir: { type: 'string' },
     branch: { type: 'string' },
     base: { type: 'string' },
     again: { type: 'boolean', default: false },
@@ -205,20 +223,44 @@ function parse(argv: string[]): { repo: string; prune: boolean; values: Record<s
   } as const
   let values
   try {
-    values = parseArgs({ args: expandArgs(argv, options, ['name', 'branch', 'base', 'module']), options }).values
+    values = parseArgs({ args: expandArgs(argv, options, ['name', 'branch', 'base', 'module', 'kind', 'dir']), options }).values
   } catch (e) {
     throw new Usage((e as Error).message)
   }
   if (values.help) return { repo: '', prune: false, values }
   if (!values.repo) throw new Usage('--repo 가 필요하다')
   if (values.prune) {
-    const extra = (['module', 'name', 'branch', 'base'] as const).filter((key) => values[key] !== undefined)
+    const extra = (['module', 'name', 'kind', 'dir', 'branch', 'base'] as const).filter((key) => values[key] !== undefined)
     if (extra.length > 0 || values.again) throw new Usage('--prune 은 --repo 와만 준다')
   } else {
     if (!values.module) throw new Usage('--module 이 필요하다')
     if (!values.name) throw new Usage('--name 이 필요하다')
+    if (values.kind !== undefined && values.kind !== 'sql' && values.kind !== 'java') throw new Usage(`--kind 는 sql 이나 java 다: ${values.kind}`)
+    if (values.dir !== undefined && values.kind !== 'java') throw new Usage('--dir 는 --kind java 와만 준다')
   }
   return { repo: values.repo, prune: values.prune, values }
+}
+
+function sqlDir(dirs: Record<string, string>, module: string): string {
+  if (Object.hasOwn(dirs, module)) return dirs[module]
+  const known = Object.keys(dirs).sort()
+  throw new Usage(`설정의 migrations.dirs 에 모듈 ${module} 이 없다. ${known.length > 0 ? `있는 모듈: ${known.join(', ')}` : 'migrations.dirs 가 비었다'}`)
+}
+
+// Java 마이그레이션 폴더. 그 모듈의 migrations.watch 가 하나면 그것, 여럿이면 --dir 로 고른 것이다
+function javaDir(watch: Record<string, string[]>, module: string, picked: string | undefined): string {
+  const found = Object.hasOwn(watch, module) ? watch[module] : []
+  if (found.length === 0) {
+    const known = Object.keys(watch).sort()
+    throw new Usage(`--kind java 는 migrations.watch 의 폴더에 만든다. 모듈 ${module} 이 없다. ${known.length > 0 ? `있는 모듈: ${known.join(', ')}` : 'migrations.watch 가 비었다'}`)
+  }
+  if (picked === undefined) {
+    if (found.length === 1) return found[0]
+    throw new Usage(`모듈 ${module} 의 migrations.watch 폴더가 여럿이라 --dir 로 고른다: ${found.join(', ')}`)
+  }
+  const dir = picked.replace(/\/+$/, '')
+  if (found.includes(dir)) return dir
+  throw new Usage(`--dir ${picked} 는 모듈 ${module} 의 migrations.watch 에 없다. 있는 폴더: ${found.join(', ')}`)
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -252,20 +294,18 @@ async function main(argv: string[]): Promise<number> {
     }
     try {
       const module = values.module as string
-      if (!Object.hasOwn(dirs, module)) {
-        const known = Object.keys(dirs).sort()
-        throw new Usage(`설정의 migrations.dirs 에 모듈 ${module} 이 없다. ${known.length > 0 ? `있는 모듈: ${known.join(', ')}` : 'migrations.dirs 가 비었다'}`)
-      }
+      const kind: MigrationKind = values.kind === 'java' ? 'java' : 'sql'
+      const dir = kind === 'java' ? javaDir(watch, module, values.dir as string | undefined) : sqlDir(dirs, module)
       const name = values.name as string
       try {
-        slug(name)
+        migrationName(name, kind)
       } catch (e) {
         throw new Usage((e as Error).message)
       }
       const branch = (values.branch as string | undefined) ?? git(process.cwd(), ['branch', '--show-current']).stdout.trim()
       if (!branch) throw new Usage('--branch 가 없고 작업 디렉터리의 현재 브랜치도 읽지 못했다')
       const base = (values.base as string | undefined) || defaultBase(repo) || 'main'
-      target = { module, name, branch, base, again: values.again === true, dir: dirs[module], watched: watchedDirs(dirs, watch) }
+      target = { module, name, kind, branch, base, again: values.again === true, dir, watched: watchedDirs(dirs, watch) }
     } catch (e) {
       if (!(e instanceof Usage)) throw e
       process.stderr.write(`${USAGE}\nreserve-migration: ${e.message}\n`)
@@ -318,6 +358,7 @@ async function main(argv: string[]): Promise<number> {
         branch: target.branch,
         again: target.again,
         dir: target.dir,
+        kind: target.kind,
         at: new Date().toISOString(),
         baseMax: lookup.baseMax,
         open: lookup.open,
